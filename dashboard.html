@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Live Ops Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; background: #f6f7f9; color: #222; }
+  h2 { margin: 24px 0 8px; font-size: 16px; }
+  table { border-collapse: collapse; background: #fff; width: 100%; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid #e3e5e8; text-align: right; font-size: 14px; }
+  th:first-child, td:first-child, td.l { text-align: left; }
+  .flag { background: #fff1f0; }
+  .high { color: #c62828; font-weight: 600; } .medium { color: #e67e00; } .low { color: #607d8b; }
+  .muted { color: #777; font-size: 13px; }
+</style></head>
+<body>
+<h1 style="font-size:20px">Live Ops Dashboard <span id="ts" class="muted"></span></h1>
+<div id="pipe" class="muted"></div>
+<h2>Stores</h2><table id="stores"></table>
+<h2>Rule anomalies <span id="rsum" class="muted"></span></h2><table id="rules"></table>
+<h2>AI anomalies <span id="asum" class="muted"></span></h2><table id="ai"></table>
+<script>
+const cols = ["total", "open", "packed", "out_for_delivery", "delivered", "oldest_ofd_age_s", "ofd_over_delay"];
+const row = (cells, cls = "") => `<tr class="${cls}">${cells.join("")}</tr>`;
+new EventSource("/stream").onmessage = (e) => {
+  const { dashboard: d, anomalies: a, ai_anomalies: ai } = JSON.parse(e.data);
+  if (!d.stores) return;
+  document.getElementById("ts").textContent = new Date(d.generated_at * 1000).toLocaleTimeString();
+  document.getElementById("pipe").textContent = Object.entries(d.pipeline).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const flagged = new Set(a.anomalies.map(x => x.store_id));
+  document.getElementById("stores").innerHTML = row(["<th>store</th>", ...cols.map(c => `<th>${c}</th>`)]) +
+    Object.entries(d.stores).map(([s, m]) => row([`<td>${s}</td>`, ...cols.map(c => `<td>${m[c]}</td>`)], flagged.has(s) ? "flag" : "")).join("") +
+    row(["<td><b>all</b></td>", ...cols.map(c => `<td><b>${d.totals[c] ?? ""}</b></td>`)]);
+  document.getElementById("rsum").textContent = a.summary;
+  document.getElementById("rules").innerHTML = a.anomalies.map(x =>
+    row([`<td>${x.store_id}</td>`, `<td class="l">${x.type}</td>`, `<td class="${x.severity}">${x.severity}</td>`, `<td class="l">${x.message}</td>`])).join("");
+  document.getElementById("asum").textContent = ai.status === "ok"
+    ? `${ai.summary} (${ai.model}, ${new Date(ai.generated_at * 1000).toLocaleTimeString()})` : `${ai.status} ${ai.error ?? ""}`;
+  document.getElementById("ai").innerHTML = (ai.anomalies || []).map(x =>
+    row([`<td>${x.store_id}</td>`, `<td class="l">${x.type}</td>`, `<td class="${x.severity}">${x.severity}</td>`, `<td class="l">${x.reason}</td>`, `<td class="l">${x.suggested_action}</td>`])).join("");
+};
+</script>
+</body></html>
